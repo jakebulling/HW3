@@ -143,11 +143,51 @@ plot(predict_parts(explainer = rf_explain,
   
   - Construct a SHAP graph and interpret it. Does it tell a similar story to the break-down plot?  
 
+```{r}
+rf_shap <-predict_parts(explainer = rf_explain,
+                        new_observation = obs4,
+                        type = "shap",
+                        B = 10)
+
+rf_shap_250 <-predict_parts(explainer = rf_explain,
+                        new_observation = obs250,
+                        type = "shap",
+                        B = 10)
+rf_shap_1000 <-predict_parts(explainer = rf_explain,
+                        new_observation = obs1000,
+                        type = "shap",
+                        B = 10)
+
+plot(rf_shap) 
+plot(rf_shap_250) 
+plot(rf_shap_1000)
+```
+These results are consistent with the results obtained earlier that latitude, longitude, and the square foot living are the largest contributors. 
 
 
   - Construct a LIME graph (follow my code carefully). How close is each original prediction to the prediction from the local model? Interpret the result. You can also try using fewer or more variables in the local model than I used in the example.  
   
+```{r}
+set.seed(494)
+model_type.dalex_explainer <- DALEXtra::model_type.dalex_explainer
+predict_model.dalex_explainer <- DALEXtra::predict_model.dalex_explainer
+
+lime_rf <- predict_surrogate(explainer = rf_explain,
+                             new_observation = obs4 %>%
+                               select(-log_price), 
+                             n_features = 5,
+                             n_permutations = 1000,
+                             type = "lime")
+plot(lime_rf) + 
+  labs(x = "Variable")
+
+```
+  
+  
+  
 2. Describe how you would use the interpretable machine learning tools we've learned (both local and global) in future machine learning projects? How does each of them help you?
+
+I would use the interpretable machine learning tools to help me discover which variables I have that are most important to determining our predictions. This could help us further study the relationships that we observe from the interpretable machine learning tools. 
 
 ## SQL
 
@@ -155,9 +195,47 @@ You will use the `airlines` data from the SQL database that I used in the exampl
 
 **Tasks**:
 
-1. Create a SQL chunk and an equivalent R code chunk that does the following: for each airport (with its name, not code), year, and month find the total number of departing flights, the distinct destinations to which they flew, the average length of the flight, the average distance of the flight, and the proportion of flights that arrived more than 20 minutes late. In the R code chunk, write this out to a dataset. (HINT: 1. start small! 2. you may want to do the R part first and use it to "cheat" into the SQL code).  
-  - With the dataset you wrote out, create a graph that helps illustrate the "worst" airports in terms of late arrivals. You have some freedom in how you define worst and you may want to consider some of the other variables you computed. Do some theming to make your graph look glamorous (those of you who weren't in my intro data science class this year may want to watch Will Chase's [Glamour of Graphics](https://www.youtube.com/watch?v=h5cTacaWE6I) talk for inspiration).  
+1. Create a SQL chunk and an equivalent R code chunk that does the following: for each airport (with its name, not code), year, and month find the total number of departing flights, the distinct destinations to which they flew, the average length of the flight, the average distance of the flight, and the proportion of flights that arrived more than 20 minutes late. In the R code chunk, write this out to a dataset. (HINT: 1. start small! 2. you may want to do the R part first and use it to "cheat" into the SQL code).
+
+  - With the dataset you wrote out, create a graph that helps illustrate the "worst" airports in terms of late arrivals. You have some freedom in how you define worst and you may want to consider some of the other variables you computed. Do some theming to make your graph look glamorous (those of you who weren't in my intro data science class this year may want to watch Will Chase's [Glamour of Graphics](https://www.youtube.com/watch?v=h5cTacaWE6I) talk for inspiration). 
+  
   - Although your graph was truly inspirational, you've been requested to "boil it down to a few numbers." Some people just don't appreciate all that effort you put in. And, you need to use the already summarized data that you already pulled in from SQL. Create a table with 6 or fewer rows and 3 or fewer columns that summarizes which airport is the "worst" in terms of late arrivals. Be careful with your calculations. You may consider using the `kable`, `kableExtra`, or `gt` packages to make your table look truly spectacular.
+  
+  
+```{r}
+con_air <- dbConnect_scidb("airlines")
+
+
+flight_airport_df <- 
+  tbl(con_air, "flights") %>%
+  mutate(faa = origin) %>%
+  group_by(origin, month, year) %>%
+  summarize(num_depart = n(),
+            dist_dest = n_distinct(dest), 
+            avg_air = mean(air_time), 
+            avg_distance = mean(distance), 
+            avg_delay = mean(arr_delay > 20)) %>%
+  inner_join(tbl(con_air, "airports"), 
+             by = c("faa" = "faa"))
+
+
+
+flight_airport_df
+
+flight_airport_rdf <-
+  flight_airport_df %>% 
+  collect()
+
+
+flight_airport_df %>%
+  show_query()
+
+flight_airport_rdf
+
+
+```
+
+  
   
 2. Come up with your own interesting question that data in the airlines database can help you answer. Write a SQL query and equivalent R code chunk to extract the data you need and create an elegant graph to help answer the question. Be sure to write down the question so it is clear. 
 
