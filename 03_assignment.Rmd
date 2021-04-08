@@ -23,8 +23,10 @@ library(moderndive)        # for King County housing data
 library(DALEX)             # for model interpretation  
 library(DALEXtra)          # for extension of DALEX
 library(patchwork)         # for combining plots nicely
-library(dbplyr)            # for SQL query "cheating" - part of tidyverse but needs to be loaded separately
+library(dbplyr) 
+library(scales)                # for SQL query "cheating" - part of tidyverse but needs to be loaded separately
 library(mdsr)              # for accessing some databases - goes with Modern Data Science with R textbook
+library(kableExtra)
 library(RMySQL)            # for accessing MySQL databases
 library(RSQLite)           # for accessing SQLite databases
 
@@ -199,40 +201,96 @@ You will use the `airlines` data from the SQL database that I used in the exampl
 
   - With the dataset you wrote out, create a graph that helps illustrate the "worst" airports in terms of late arrivals. You have some freedom in how you define worst and you may want to consider some of the other variables you computed. Do some theming to make your graph look glamorous (those of you who weren't in my intro data science class this year may want to watch Will Chase's [Glamour of Graphics](https://www.youtube.com/watch?v=h5cTacaWE6I) talk for inspiration). 
   
-  - Although your graph was truly inspirational, you've been requested to "boil it down to a few numbers." Some people just don't appreciate all that effort you put in. And, you need to use the already summarized data that you already pulled in from SQL. Create a table with 6 or fewer rows and 3 or fewer columns that summarizes which airport is the "worst" in terms of late arrivals. Be careful with your calculations. You may consider using the `kable`, `kableExtra`, or `gt` packages to make your table look truly spectacular.
+
   
   
 ```{r}
 con_air <- dbConnect_scidb("airlines")
 
+flights_df <- tbl(con_air, "flights") %>%
+  head(2000000)
+
+flights_2000_df <- collect(flights_df)
+
+airports_df <- tbl(con_air, "airports")
+
+airports_df_2 <- collect(airports_df)
 
 flight_airport_df <- 
-  tbl(con_air, "flights") %>%
+  flights_2000_df %>%
   mutate(faa = origin) %>%
-  group_by(origin, month, year) %>%
+  group_by(origin, month) %>%
   summarize(num_depart = n(),
             dist_dest = n_distinct(dest), 
             avg_air = mean(air_time), 
             avg_distance = mean(distance), 
             avg_delay = mean(arr_delay > 20)) %>%
-  inner_join(tbl(con_air, "airports"), 
-             by = c("faa" = "faa"))
+    inner_join(airports_df_2, by = c("origin" = "faa"))
 
 
 
-flight_airport_df
-
-flight_airport_rdf <-
-  flight_airport_df %>% 
+flight_airport_rdf <- flight_airport_df %>%
   collect()
 
 
-flight_airport_df %>%
-  show_query()
+
 
 flight_airport_rdf
 
 
+
+```
+
+  
+```{sql connection=con_air}
+SELECT `name`, `month`, `year`, COUNT(*) AS `num_depart`, COUNT(DISTINCT `dest`) AS `dist_dest`, AVG(`air_time`) AS `avg_air`, AVG(`distance`) AS `avg_distance`, AVG(`arr_delay` > 20.0) AS `avg_delay`, `faa`
+FROM (SELECT `year`, `month`, `day`, `dep_time`, `sched_dep_time`, `dep_delay`, `arr_time`, `sched_arr_time`, `arr_delay`, `carrier`, `tailnum`, `flight`, `origin`, `dest`, `air_time`, `distance`, `cancelled`, `diverted`, `hour`, `minute`, `time_hour`, `LHS`.`faa` AS `faa`, `name`, `lat`, `lon`, `alt`, `tz`, `dst`, `city`, `country`
+FROM (SELECT `year`, `month`, `day`, `dep_time`, `sched_dep_time`, `dep_delay`, `arr_time`, `sched_arr_time`, `arr_delay`, `carrier`, `tailnum`, `flight`, `origin`, `dest`, `air_time`, `distance`, `cancelled`, `diverted`, `hour`, `minute`, `time_hour`, `origin` AS `faa`
+FROM `flights`) `LHS`
+INNER JOIN `airports` AS `RHS`
+ON (`LHS`.`faa` = `RHS`.`faa`)
+) `q01`
+GROUP BY `name`, `month`, `year`
+```
+
+  
+```{r, fig.width=10, fig.height=15}
+?fct_reorder
+
+flight_airport_rdf %>%
+  filter(num_depart >1000) %>%
+  mutate(name = fct_reorder(name, avg_delay)) %>%
+  ggplot() + 
+  aes(x = avg_delay, 
+      y = fct_reorder(name, avg_delay)) + 
+  geom_col(fill = "lightblue")+ 
+  scale_x_continuous(expand = c(0,0), 
+                     labels = percent) + 
+  labs(x = NULL,
+       y = NULL,
+       title = "Which airlines had the largest % of flights that \nwere more than 20 minutes late from 2010-2017?") +
+  theme_minimal()
+```
+
+
+
+  - Although your graph was truly inspirational, you've been requested to "boil it down to a few numbers." Some people just don't appreciate all that effort you put in. And, you need to use the already summarized data that you already pulled in from SQL. Create a table with 6 or fewer rows and 3 or fewer columns that summarizes which airport is the "worst" in terms of late arrivals. Be careful with your calculations. You may consider using the `kable`, `kableExtra`, or `gt` packages to make your table look truly spectacular.
+  
+  
+  
+```{r}
+table_df<-flight_airport_rdf %>%
+  select(num_depart, avg_delay, name) %>%
+  group_by(name)%>%
+  summarise(prop_late_over_20 = mean(avg_delay), 
+            num_depart = sum(num_depart)) %>%
+  filter(num_depart > 1000) %>%
+  arrange(desc(prop_late_over_20)) %>%
+  head(6)
+
+table_df %>%
+  kbl(caption = "Worst Airports by Proportion Flights late over 20 minutes.(min 1000 flights)") %>%
+  kable_classic(full_width = F, html_font = "Cambria")
 ```
 
   
@@ -249,9 +307,58 @@ If you need to revisit the material, it is posted on the moodle page. I've tried
 Using the example from class that we presented as a baseline (or your own if you really want to be ambitious), try to add the following components to the map of the contiguous United States:
 
 1.	Change the color scheme of the map from the default blue (one option could be viridis).
+```{r}
+states <- st_as_sf(maps::map("state", plot = FALSE, fill = TRUE))
+states <- states %>%
+  mutate(area = as.numeric(st_area(states)))
+
+
+ggplot(data = states) +
+  geom_sf(aes(fill = area), color = "black") +
+  coord_sf(xlim = c(-127, -63), ylim = c(24, 51), expand = FALSE) +
+  scale_fill_gradient(low = "white", high = "purple") +
+  theme_map()
+```
+
 2.	Add a dot (or any symbol you want) to the centroid of each state.
+```{r}
+?stat_sf_coordinates
+ggplot(data = states) +
+  geom_sf(aes(fill = area) , color = "black") +
+  stat_sf_coordinates() +
+  coord_sf(xlim = c(-127, -63), ylim = c(24, 51), expand = FALSE) +
+  scale_fill_gradient(low = "white", high = "purple") +
+  theme_map()
+
+```
+
 3.	Add a layer onto the map with the counties.
+
+```{r}
+counties <- st_as_sf(maps::map("county", plot = FALSE, fill = TRUE))
+counties <- counties %>%
+  mutate(area = as.numeric(st_area(counties)))
+
+
+
+ggplot(data = states) +
+    geom_sf(data = counties, aes(fill = area), color = "black") + 
+  coord_sf() + 
+  scale_fill_gradient(low = "light blue", high = "purple") + 
+  theme_map()
+
+
+```
+
 4.	Change the coordinates of the map to zoom in on your favorite state.
+
+```{r}
+ggplot(data = states) +
+    geom_sf(aes(fill = area), color = "black")+ 
+  coord_sf(xlim = c(-109, -103), ylim = c(30, 37)) + 
+  scale_fill_gradient(low = "light blue", high = "purple")  
+```
+
 
 Hint: https://www.r-spatial.org/r/2018/10/25/ggplot2-sf-2.html is a useful reference for some of the questions
 
@@ -292,6 +399,22 @@ troll_tweets <- read_csv("https://raw.githubusercontent.com/fivethirtyeight/russ
   c. Create two or three basic exploratory plots of the data (ex. plot of the different locations from which tweets were posted, plot of the account category of a tweet)
   
 ```{r}
+#A
+new_trolls <- troll_tweets %>%
+  filter(language == "English")
+
+#B
+
+dim(new_trolls)
+
+#C
+ggplot(new_trolls) + 
+  aes(x = account_category) + 
+  geom_bar()
+
+ggplot(new_trolls) + 
+  aes(x = followers, y = following) + 
+  geom_point()
 
 ```
 
