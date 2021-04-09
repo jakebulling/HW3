@@ -9,7 +9,7 @@ output:
 ---
 
 ```{r setup, include=FALSE}
-#knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
+knitr::opts_chunk$set(echo = TRUE, message=FALSE, warning=FALSE)
 ```
 
 ```{r libraries, message=FALSE}
@@ -52,6 +52,8 @@ When you finish the assignment, remove the `#` from the options chunk at the top
 From now on, GitHub should be part of your routine when doing assignments. I recommend making it part of your process anytime you are working in R, but I'll make you show it's part of your process for assignments.
 
 **Task**: When you are finished with the assignment, post a link below to the GitHub repo for the assignment. If you want to post it to your personal website, that's ok (not required). Make sure the link goes to a spot in the repo where I can easily find this assignment. For example, if you have a website with a blog and post the assignment as a blog post, link to the post's folder in the repo. As an example, I've linked to my GitHub stacking material [here](https://github.com/llendway/ads_website/tree/master/_posts/2021-03-22-stacking).
+
+https://github.com/jakebulling/HW3.git
 
 
 ## Local Interpretable Machine Learning
@@ -197,7 +199,7 @@ You will use the `airlines` data from the SQL database that I used in the exampl
 
 **Tasks**:
 
-1. Create a SQL chunk and an equivalent R code chunk that does the following: for each airport (with its name, not code), year, and month find the total number of departing flights, the distinct destinations to which they flew, the average length of the flight, the average distance of the flight, and the proportion of flights that arrived more than 20 minutes late. In the R code chunk, write this out to a dataset. (HINT: 1. start small! 2. you may want to do the R part first and use it to "cheat" into the SQL code).
+1. Create a SQL chunk and an equivalent R code chunk that does the following: for each airport (with its name, not code), year, and month find the total number of departing flights, the average distance of the flight, and the proportion of flights that arrived more than 20 minutes late. In the R code chunk, write this out to a dataset. (HINT: 1. start small! 2. you may want to do the R part first and use it to "cheat" into the SQL code).
 
   - With the dataset you wrote out, create a graph that helps illustrate the "worst" airports in terms of late arrivals. You have some freedom in how you define worst and you may want to consider some of the other variables you computed. Do some theming to make your graph look glamorous (those of you who weren't in my intro data science class this year may want to watch Will Chase's [Glamour of Graphics](https://www.youtube.com/watch?v=h5cTacaWE6I) talk for inspiration). 
   
@@ -207,55 +209,46 @@ You will use the `airlines` data from the SQL database that I used in the exampl
 ```{r}
 con_air <- dbConnect_scidb("airlines")
 
-flights_df <- tbl(con_air, "flights") %>%
-  head(2000000)
+flights_df <- tbl(con_air, "flights") 
 
-flights_2000_df <- collect(flights_df)
 
 airports_df <- tbl(con_air, "airports")
 
-airports_df_2 <- collect(airports_df)
+
 
 flight_airport_df <- 
-  flights_2000_df %>%
+  flights_df %>%
+  filter(year == 2017) %>%
   mutate(faa = origin) %>%
   group_by(origin, month) %>%
   summarize(num_depart = n(),
-            dist_dest = n_distinct(dest), 
-            avg_air = mean(air_time), 
-            avg_distance = mean(distance), 
-            avg_delay = mean(arr_delay > 20)) %>%
-    inner_join(airports_df_2, by = c("origin" = "faa"))
+             avg_distance = mean(distance),
+             avg_delay = mean(arr_delay > 20)) %>%
+  inner_join(airports_df, by = c("origin" = "faa"))
 
 
+flight_airport_df %>%
+  show_query()
 
 flight_airport_rdf <- flight_airport_df %>%
   collect()
-
-
-
-
-flight_airport_rdf
-
-
-
 ```
 
   
 ```{sql connection=con_air}
-SELECT `name`, `month`, `year`, COUNT(*) AS `num_depart`, COUNT(DISTINCT `dest`) AS `dist_dest`, AVG(`air_time`) AS `avg_air`, AVG(`distance`) AS `avg_distance`, AVG(`arr_delay` > 20.0) AS `avg_delay`, `faa`
-FROM (SELECT `year`, `month`, `day`, `dep_time`, `sched_dep_time`, `dep_delay`, `arr_time`, `sched_arr_time`, `arr_delay`, `carrier`, `tailnum`, `flight`, `origin`, `dest`, `air_time`, `distance`, `cancelled`, `diverted`, `hour`, `minute`, `time_hour`, `LHS`.`faa` AS `faa`, `name`, `lat`, `lon`, `alt`, `tz`, `dst`, `city`, `country`
+SELECT `origin`, `month`, `num_depart`, `avg_distance`, `avg_delay`, `name`, `lat`, `lon`, `alt`, `tz`, `dst`, `city`, `country`
+FROM (SELECT `origin`, `month`, COUNT(*) AS `num_depart`, AVG(`distance`) AS `avg_distance`, AVG(`arr_delay` > 20.0) AS `avg_delay`
 FROM (SELECT `year`, `month`, `day`, `dep_time`, `sched_dep_time`, `dep_delay`, `arr_time`, `sched_arr_time`, `arr_delay`, `carrier`, `tailnum`, `flight`, `origin`, `dest`, `air_time`, `distance`, `cancelled`, `diverted`, `hour`, `minute`, `time_hour`, `origin` AS `faa`
-FROM `flights`) `LHS`
+FROM `flights`
+WHERE (`year` = 2017.0)) `q01`
+GROUP BY `origin`, `month`) `LHS`
 INNER JOIN `airports` AS `RHS`
-ON (`LHS`.`faa` = `RHS`.`faa`)
-) `q01`
-GROUP BY `name`, `month`, `year`
+ON (`LHS`.`origin` = `RHS`.`faa`)
 ```
 
   
 ```{r, fig.width=10, fig.height=15}
-?fct_reorder
+
 
 flight_airport_rdf %>%
   filter(num_depart >1000) %>%
@@ -297,6 +290,39 @@ table_df %>%
   
 2. Come up with your own interesting question that data in the airlines database can help you answer. Write a SQL query and equivalent R code chunk to extract the data you need and create an elegant graph to help answer the question. Be sure to write down the question so it is clear. 
 
+Which airport was the the most popular destination?  
+
+```{r, fig.width=8, fig.height=10}
+most_delay_time <- 
+  flights_df %>%
+  filter(year == 2015) %>%
+  group_by(dest) %>%
+  summarize(flights_received = n()) %>%
+  inner_join(airports_df, by = c("dest" = "faa")) %>%
+  ungroup() %>%
+  group_by(name)
+
+most_delay_time_df <- most_delay_time %>%
+  collect()
+
+most_delay_time_df%>%
+  arrange(desc(flights_received))
+
+
+most_delay_time_df %>%
+  filter(flights_received > 10000)%>%
+  ggplot() + 
+  aes(x = flights_received, y = fct_reorder(name, flights_received)) + 
+  geom_col(fill = "navy blue") + 
+  labs(x = NULL, 
+       y = NULL, 
+       title = "Which airport recieved the largest amount of flights in 2015? ") + 
+  scale_x_continuous(labels = scales::comma) + 
+  theme_minimal()
+```
+
+
+
 
 ## Function Friday
 
@@ -322,7 +348,7 @@ ggplot(data = states) +
 
 2.	Add a dot (or any symbol you want) to the centroid of each state.
 ```{r}
-?stat_sf_coordinates
+
 ggplot(data = states) +
   geom_sf(aes(fill = area) , color = "black") +
   stat_sf_coordinates() +
@@ -388,7 +414,7 @@ Because there are 12 datasets containing 2,973,371 tweets sent by 2,848 Twitter 
 
 1. Read in Troll Tweets Dataset - this takes a while. You can cache it so you don't need to read it in again each time you knit. Be sure to remove the `eval=FALSE`!!!!
 
-```{r, cache=TRUE, eval=FALSE}
+```{r, cache=TRUE}
 troll_tweets <- read_csv("https://raw.githubusercontent.com/fivethirtyeight/russian-troll-tweets/master/IRAhandle_tweets_12.csv")
 ```
 
@@ -422,9 +448,11 @@ ggplot(new_trolls) +
 
 We want each row to represent a word from a tweet, rather than an entire tweet. Be sure to remove the `eval=FALSE`!!!!
 
-```{r, eval = FALSE}
-troll_tweets_untoken <- troll_tweets1 %>%
-  unnest_tokens(???,???)
+```{r}
+
+  
+troll_tweets_untoken <- new_trolls %>%
+  unnest_tokens(word, content)
 
 troll_tweets_untoken
 ```
@@ -434,7 +462,7 @@ troll_tweets_untoken
 
 4. Remove stopwords. Be sure to remove the `eval=FALSE`!!!!
 
-```{r, eval = FALSE}
+```{r}
 #get rid of stopwords (the, and, etc.)
 troll_tweets_cleaned <- troll_tweets_untoken %>%
   anti_join(stop_words)
@@ -442,18 +470,31 @@ troll_tweets_cleaned <- troll_tweets_untoken %>%
 
 Take a look at the troll_tweets_cleaned dataset.  Are there any other words/letters/numbers that we want to eliminate that weren't taken care of by stop_words? Be sure to remove the `eval=FALSE`!!!!
 
-```{r, eval = FALSE}
+```{r}
 #get rid of http, https, t.co, rt, amp, single number digits, and singular letters
 troll_tweets_cleaned <- troll_tweets_cleaned %>%
-  filter(word != ????) # you can use %in% for a list of words
+  filter(word != "http", 
+         word != "https",
+         word !=  "t.co",
+         word != "rt",
+         word != "amp", 
+         word != "1", 
+         word != "2", 
+         word != "3", 
+         word != "4", 
+         word != "5", 
+         word != "6", 
+         word != "7", 
+         word != "8", 
+         word != "9") # you can use %in% for a list of words
 ```
 
 
 5. Look at a subset of the tweets to see how often the top words appear.
 
-```{r, eval = FALSE}
+```{r, fig.height=10, fig.width=8}
 troll_tweets_small <- troll_tweets_cleaned %>%
-  count(??) %>%
+  count(word) %>%
   slice_max(order_by = n, n = 50) # 50 most occurring words
 
 # visualize the number of times the 50 top words appear
@@ -470,18 +511,20 @@ ggplot(troll_tweets_small,
   
 Be sure to remove the `eval=FALSE`!!!!
 
-```{r, eval = FALSE}
+```{r}
 # look at sentiment
-get_sentiments("bing")
+sentiments <-get_sentiments("bing")
 
 # assign a sentiment to each word that has one associated
 troll_tweets_sentiment <- troll_tweets_cleaned %>%
-  inner_join(???)
+  inner_join(sentiments)
 
 # count the sentiments
-troll_tweets_sentiment %>% 
-  ???
+troll_tweets_sentiment %>%
+  count(sentiment)
 ```
+
+There are more negative words than positive because the fake tweets are trying to tear down the competition with their tweets. 
 
 7. Using the troll_tweets_small dataset, make a wordcloud:
 
@@ -491,33 +534,42 @@ troll_tweets_sentiment %>%
 
 Be sure to remove the `eval=FALSE`!!!!
 
-```{r, eval = FALSE}
+```{r}
 # make a wordcloud where the size of the word is based on the number of times the word appears across the tweets
 
 troll_tweets_small %>%
-  with(wordcloud(word, n, max.words = ??))
+  with(wordcloud(word, n, max.words = 12))
 
 # make a wordcloud colored by sentiment
 
 troll_tweets_sentiment %>%
+  count(word, sentiment, sort = TRUE) %>%
   acast(word ~ sentiment, value.var = "n", fill = 0) %>%
-  comparison.cloud(colors = c(??,??),
-                   max.words = ??)
+  comparison.cloud(colors = c("blue", "orange"),
+                   max.words = 20)
 ```
 
 Are there any words whose categorization as "positive" or "negative" surprised you?
 
+trump as positive surprised me for sure as breaking being negative just because of the many different uses of the word breaking, like breaking news, isn't necessarily negative. 
 
 ## Projects
 
 Read the project description on the moodle page. Talk to your group members about potential topics. 
 
+
+
 **Task:**
 
 Write a short paragraph about ideas you have. If you already have some data sources in mind, you can link to those, but I'm more concerned with you having a topic that you're interested in investigating right now. 
+
+We are considering doing projects related to sports or crime, we have thought of using fifa video game data to predict biases of the game, we have also come up with the idea to cluster different baseball players into different player types, and then analyzing what team makeup makes the best team. We also have discussed creating a recommender project, similar to netflix or google searches. 
+
 
 ## "Undoing" bias
 
 **Task:**
 
 Read this tweet [thread](https://threadreaderapp.com/thread/1375957284061376516.html) by [Deb Raji](https://en.wikipedia.org/wiki/Deborah_Raji) who you may remember from the *Coded Bias* film. Write a short paragraph that discusses at least one of the misconceptions.
+
+It was interesting to me when she brought up the point that the bias can begin anywhere in the process. All the way back to the data collection process things can be biased. When you are doing your preprocessing, the process could be biased. I think that this needs to be recognized even more and thought about while working with data. 
